@@ -19,37 +19,6 @@ const MOZ60TOOL_PATH = GLib.build_filenamev([Me.path, 'moz60tool']);
 const MOZ60TOOL_URI = 'https://gitlab.gnome.org/ptomato/moz60tool/tree/master';
 
 
-// FIXME
-function foobar() {
-    try {
-        dangerous();
-    } catch (e if e.code === 23) {
-        print('okay');
-    }
-    const arr = [1, 2, 3];
-    const obj = {a: 1, b: 2, c: 3};
-    for each (let a in obj)
-        print(a);
-    for each (let a in arr)
-        print(a);
-    const squares = arr.map(function (x) x * x);
-    [for (x of squares) if (x % 2 == 0) print(x)];
-    print((for (x of squares) if (x % 2 == 1) x + 1));
-    function makeIterator(array) {
-        var nextIndex = 0;
-        return {
-           next: function(){
-               if(nextIndex < array.length)
-                   return array[nextIndex++];
-               else
-                   throw new StopIteration();
-           }
-        };
-    }
-    print('okaaaaaaay'.replace('a', 'e', 'g'));
-}
-
-
 /**
  * Run moz60tool on every JavaScript file in @path, ensuring it isn't a symlink
  */
