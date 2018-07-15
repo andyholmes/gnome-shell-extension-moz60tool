@@ -1,0 +1,213 @@
+#!/usr/bin/env gjs
+
+var filename;
+var script;
+var numErrors = 0;
+
+if (typeof imports !== 'undefined') {
+    // We're running under GJS
+    window.System = imports.system;
+
+    if (System.version > 15304) {
+        print('Your GJS has already migrated to SpiderMonkey 60.');
+        print('Try running this script with /usr/bin/js52 as a workaround.');
+        System.exit(1);
+    }
+
+    const {Gio} = imports.gi;
+    filename = ARGV[0];
+    const file = Gio.File.new_for_commandline_arg(filename);
+    [, script] = file.load_contents(null);
+    script = script.toString('UTF-8');
+} else {
+    // Running under js52 shell
+    /* global os, quit, scriptArgs, System: true */
+    filename = scriptArgs[0];
+    script = os.file.readFile(filename);
+    System = {
+        exit(code) {
+            quit(code);
+        }
+    };
+}
+
+function walk(node, func) {
+    func(node);
+    nodesToWalk(node).forEach(n => walk(n, func));
+}
+
+function nodesToWalk(node) {
+    switch(node.type) {
+    case 'ArrayPattern':
+    case 'BreakStatement':
+    case 'CallSiteObject':  // i.e. strings passed to template
+    case 'ContinueStatement':
+    case 'DebuggerStatement':
+    case 'EmptyStatement':
+    case 'Identifier':
+    case 'Literal':
+    case 'MetaProperty':  // i.e. new.target
+    case 'Super':
+    case 'ThisExpression':
+        return [];
+    case 'ArrowFunctionExpression':
+    case 'FunctionDeclaration':
+    case 'FunctionExpression':
+        return [...node.defaults, node.body].filter(n => !!n);
+    case 'AssignmentExpression':
+    case 'BinaryExpression':
+    case 'ComprehensionBlock':
+    case 'LogicalExpression':
+        return [node.left, node.right];
+    case 'ArrayExpression':
+    case 'TemplateLiteral':
+        return node.elements.filter(n => !!n);
+    case 'BlockStatement':
+    case 'Program':
+        return node.body;
+    case 'CallExpression':
+    case 'NewExpression':
+    case 'TaggedTemplate':
+        return [node.callee, ...node.arguments];
+    case 'CatchClause':
+        return [node.body, node.guard].filter(n => !!n);
+    case 'ClassExpression':
+    case 'ClassStatement':
+        return [...node.body, node.superClass].filter(n => !!n);
+    case 'ClassMethod':
+        return [node.name, node.body];
+    case 'ComprehensionExpression':
+    case 'GeneratorExpression':
+        return [node.body, ...node.blocks, node.filter].filter(n => !!n);
+    case 'ComprehensionIf':
+        return [node.test];
+    case 'ComputedName':
+        return [node.name];
+    case 'ConditionalExpression':
+    case 'IfStatement':
+        return [node.test, node.consequent, node.alternate].filter(n => !!n);
+    case 'DoWhileStatement':
+    case 'WhileStatement':
+        return [node.body, node.test];
+    case 'ExportDeclaration':
+        return [node.declaration, node.source].filter(n => !!n);
+    case 'ImportDeclaration':
+        return [...node.specifiers, node.source];
+    case 'LetStatement':
+        return [...node.head, node.body];
+    case 'ExpressionStatement':
+        return [node.expression];
+    case 'ForInStatement':
+    case 'ForOfStatement':
+        return [node.body, node.left, node.right];
+    case 'ForStatement':
+        return [node.init, node.test, node.update, node.body].filter(n => !!n);
+    case 'LabeledStatement':
+        return [node.body];
+    case 'MemberExpression':
+        return [node.object, node.property];
+    case 'ObjectExpression':
+    case 'ObjectPattern':
+        return node.properties;
+    case 'Property':
+    case 'PrototypeMutation':
+        return [node.value];
+    case 'ReturnStatement':
+    case 'ThrowStatement':
+    case 'UnaryExpression':
+    case 'UpdateExpression':
+    case 'YieldExpression':
+        return node.argument ? [node.argument] : [];
+    case 'SequenceExpression':
+        return node.expressions;
+    case 'SpreadExpression':
+        return [node.expression];
+    case 'SwitchCase':
+        return [node.test, ...node.consequent].filter(n => !!n);
+    case 'SwitchStatement':
+        return [node.discriminant, ...node.cases];
+    case 'TryStatement':
+        return [node.block, node.handler, ...node.guardedHandlers,
+            node.finalizer].filter(n => !!n);
+    case 'VariableDeclaration':
+        return node.declarations;
+    case 'VariableDeclarator':
+        return node.init ? [node.init] : [];
+    case 'WithStatement':
+        return [node.object, node.body];
+    default:
+        print(`Ignoring ${node.type}, you should probably fix this in the script`);
+        return [];
+    }
+}
+
+function warn(loc, why, bad, good) {
+    print(`${loc.source}:${loc.start.line}:${loc.start.column}: ${why}`);
+    print(`  WRONG:   ${bad}`);
+    print(`  CORRECT: ${good}`);
+    numErrors++;
+}
+
+function findDeprecated(node) {
+    switch(node.type) {
+    case 'CatchClause':
+        if (node.guard)
+            warn(node.loc, 'Conditional catch clause used.',
+                'catch (e if e.code === 23) {...}',
+                'catch (e) { if (e.code === 23) {...} }');
+        break;
+    case 'ForInStatement':
+        if (node.each)
+            warn(node.loc, 'For-each-in statement used.',
+                'for each (let a in obj) {...}; for each (let a in arr) {...}',
+                'for (let a of Object.values(obj)) {...}; for (let a of arr) {...}');
+        break;
+    case 'FunctionExpression':
+        if (node.body.type !== 'BlockStatement')
+            warn(node.loc, 'Legacy lambda syntax used.',
+                'function (x) x * x',
+                'x => x * x  /* OR */  function (x) { return x * x; }');
+        break;
+    case 'ComprehensionExpression':
+        warn(node.loc, 'Array comprehension used.',
+            '[for (x of iterable) if (cond(x)) expr(x)]',
+            'iterable.filter(cond).map(expr)');
+        break;
+    case 'GeneratorExpression':
+        warn(node.loc, 'Generator expression used.',
+            '(for (x of iterable) if (cond(x)) expr(x))',
+            'function* (iterable) { for (let x of iterable) if (cond(x)) yield expr(x); }');
+        break;
+    case 'NewExpression':
+        // We can't detect all uses of the legacy iterator protocol, but
+        // StopIteration is definitely a giveaway
+        if (node.callee.type === 'Identifier' &&
+            node.callee.name === 'StopIteration')
+            warn(node.loc, 'Legacy iterator protocol used.',
+                'throw new StopIteration();',
+                'return {done: true};');
+        break;
+    case 'CallExpression':
+        // The three-argument form of String.replace() was gone already in
+        // mozjs52, but it's insidious enough (and is likely enough to still
+        // be lurking) that we'll try to detect it
+        if (node.callee.type === 'MemberExpression' &&
+            node.callee.property.type === 'Identifier' &&
+            node.callee.property.name === 'replace' &&
+            node.arguments.length === 3)
+            warn(node.loc, 'Possible use of the three-argument form of String.replace.',
+                's.replace("a", "b", "g");',
+                's.replace(/a/g, "b");');
+        break;
+    }
+}
+
+print('Scanning', filename);
+
+if (script.startsWith('#!'))
+    script = script.replace(/^#!.*$/m, '');
+
+var ast = Reflect.parse(script, {source: filename});
+walk(ast, findDeprecated);
+print(`${numErrors} error${numErrors === 1 ? '' : 's'} found.`);
+System.exit(numErrors > 0);

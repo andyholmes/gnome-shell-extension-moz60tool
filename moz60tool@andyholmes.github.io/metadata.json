@@ -1,0 +1,9 @@
+{
+"extension-id": "moz60tool",
+"uuid": "moz60tool@andyholmes.github.io",
+"name": "SpiderMonkey 60 Migration Validator",
+"description": "Check installed extensions for deprecated code using moz60tool",
+"version": "1",
+"shell-version": [ "3.26", "3.28" ],
+"url": "https://github.com/andyholmes/gnome-shell-extension-moz60tool"
+}
